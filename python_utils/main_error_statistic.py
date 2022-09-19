@@ -6,8 +6,8 @@ import random
 
 #!!!! This display code assumes a single camera group remain at the end the calibration process
 # 1. path to object calibration results
-path_reprojection_error = "/home/francois/Documents/CppProject/Stereo_Calibration/Images_NonOver6Cam/reprojection_error_data.yml"
-Nb_Camera = 1000
+path_reprojection_error = "/home/seung/catkin_ws/src/gail-camera-manager/MC-Calib/data/reprojection_error_data.yml"
+Nb_Camera = 4
 
 #Generate one color randomly per camera
 camera_color = []

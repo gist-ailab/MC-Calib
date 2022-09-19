@@ -27,11 +27,10 @@ def axisEqual3D(ax):
 #!!!! This display code assumes a single objects remain at the end the calibration process
 # 1. path to object calibration results
 #path_root = "/home/francois/Documents/CppProject/Stereo_Calibration/Images_Synth_4cam_8boards_4groups_NonOverlap/"
-path_root = "/disk/francois/Projets/Calibration_toolbox/Data/Real_Images/stereo_cube/"
-path_root = "/disk/francois/Projets/Calibration_toolbox/Data/Real_Images/2021-07-12-15-09-53/"
+path_root = "/home/seung/catkin_ws/src/gail-camera-manager/MC-Calib/data/"
 path_object_results = path_root + "calibrated_objects_data.yml"
 
-marker_size = 1
+marker_size = 29
 
 # 2. Open the file
 fs = cv2.FileStorage(path_object_results, cv2.FILE_STORAGE_READ)
