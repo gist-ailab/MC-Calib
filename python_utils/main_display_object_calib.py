@@ -5,15 +5,6 @@ import cv2
 import pdb
 
 from mpl_toolkits.mplot3d import proj3d
-def orthogonal_proj(zfront, zback):
-    a = (zfront+zback)/(zfront-zback)
-    b = -2*(zfront*zback)/(zfront-zback)
-    return np.array([[1,0,0,0],
-                        [0,1,0,0],
-                        [0,0,a,b],
-                        [0,0,0,zback]])
-proj3d.persp_transformation = orthogonal_proj
-
 
 def axisEqual3D(ax):
     extents = np.array([getattr(ax, 'get_{}lim'.format(dim))() for dim in 'xyz'])
@@ -27,7 +18,12 @@ def axisEqual3D(ax):
 #!!!! This display code assumes a single objects remain at the end the calibration process
 # 1. path to object calibration results
 #path_root = "/home/francois/Documents/CppProject/Stereo_Calibration/Images_Synth_4cam_8boards_4groups_NonOverlap/"
+<<<<<<< HEAD
 path_root = "/home/seung/catkin_ws/src/gail-camera-manager/MC-Calib/data/"
+=======
+path_root = "/disk/francois/Projets/Calibration_toolbox/Data/Real_Images/stereo_cube/"
+path_root = "/disk/francois/Projets/Dynamic_Nerf_Dataset/0-Calibration/data/Sequence_Calib_RGB/"
+>>>>>>> 6f5626a32b15047e6b03220fc354360e1b181136
 path_object_results = path_root + "calibrated_objects_data.yml"
 
 marker_size = 29
@@ -40,22 +36,16 @@ obj_mat = fs.getNode(obj_id).getNode("points").mat()
 #2. plot
 fig = plt.figure()
 ax = fig.gca(projection='3d')
+ax.set_proj_type('ortho')
 ax.set_title('3D calibrated object')
 #ax.scatter(obj_mat[0,:], obj_mat[1,:], obj_mat[2,:], c=(1.0,0.0,0.0))
 
-#To display the cube with different color on each side
-val = 0
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(1.0,0.0,0.0))
-val = val + 16
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(0.0,1.0,0.0))
-val = val + 16
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(0.0,0.0,1.0))
-val = val + 16
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(1.0,0.0,1.0))
-val = val + 16
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(0.0,1.0,1.0))
-val = val + 16
-ax.scatter(obj_mat[0,val:val+16], obj_mat[1,val:val+16], obj_mat[2,val:val+16], c=(0.0,0.0,0.0))
+
+board_idx = np.unique(obj_mat[3,:]).astype(int)
+for b_idx in board_idx:
+    pts_3D = obj_mat[0:3,obj_mat[3,:]==b_idx] #gather all the points from the same board
+    color = np.random.rand(3) # random color
+    ax.scatter(pts_3D[0,:], pts_3D[1,:], pts_3D[2,:], c=(color[0],color[1],color[2]))
 
 #ax.axis('equal')
 #ax.set_aspect('equal', 'box')

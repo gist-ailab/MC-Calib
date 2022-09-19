@@ -9,6 +9,10 @@
 #include "logger.h"
 #include "point_refinement.h"
 
+#include <boost/asio/post.hpp>
+#include <boost/asio/thread_pool.hpp>
+#include <thread>
+
 /**
  * @brief Initialize the number of cameras and the 3D Boards
  *
@@ -66,7 +70,7 @@ Calibration::Calibration(const std::string config_path) {
   if (boards_index.size() != 0) {
     max_board_idx = *max_element(boards_index.begin(), boards_index.end());
   }
-  if (square_size_per_board_.size() == 0) {
+  if (number_x_square_per_board_.size() == 0) {
     number_x_square_per_board_.assign(max_board_idx + 1, nb_x_square);
     number_y_square_per_board_.assign(max_board_idx + 1, nb_y_square);
   }
@@ -137,16 +141,16 @@ Calibration::Calibration(const std::string config_path) {
  *
  */
 void Calibration::boardExtraction() {
-  std::unordered_set<cv::String> allowed_exts = {"jpg",  "png", "bmp",
-                                                 "jpeg", "jp2", "tiff"};
+  const std::unordered_set<cv::String> allowed_exts = {"jpg",  "png", "bmp",
+                                                       "jpeg", "jp2", "tiff"};
 
   // iterate through the cameras
   for (int cam = 0; cam < nb_camera_; cam++) {
     // prepare the folder's name
     std::stringstream ss;
     ss << std::setw(3) << std::setfill('0') << cam + 1;
-    std::string cam_nb = ss.str();
-    std::string cam_path = root_dir_ + cam_prefix_ + cam_nb;
+    const std::string cam_nb = ss.str();
+    const std::string cam_path = root_dir_ + cam_prefix_ + cam_nb;
     LOG_INFO << "Extraction camera " << cam_nb;
 
     // iterate through the images for corner extraction
@@ -155,7 +159,7 @@ void Calibration::boardExtraction() {
 
     // filter based on allowed extensions
     std::vector<cv::String> fn_filtered;
-    for (cv::String cur_path : fn) {
+    for (const cv::String &cur_path : fn) {
       std::size_t ext_idx = cur_path.find_last_of(".");
       cv::String cur_ext = cur_path.substr(ext_idx + 1);
       if (allowed_exts.find(cur_ext) != allowed_exts.end()) {
@@ -164,38 +168,53 @@ void Calibration::boardExtraction() {
     }
     fn = fn_filtered;
 
-    size_t count_frame =
-        fn.size(); // number of allowed image files in images folder
-    for (size_t frameind = 0; frameind < count_frame; frameind = frameind + 1) {
-      // open Image
-      cv::Mat currentIm = cv::imread(fn[frameind]);
-      std::string frame_path = fn[frameind];
-      // detect the checkerboard on this image
-      LOG_DEBUG << "Frame index :: " << frameind;
-      detectBoards(currentIm, cam, frameind, frame_path);
-      LOG_DEBUG << frameind;
-      // displayBoards(currentIm, cam, frameind); // Display frame
-    }
+    detectBoards(fn, cam);
   }
+}
+
+/**
+ * @brief Detect boards on images
+ *
+ * @param fn images paths
+ * @param cam_idx camera index which acquire the frame
+ */
+void Calibration::detectBoards(const std::vector<cv::String> &fn,
+                               const int cam_idx) {
+  const unsigned int num_threads = std::thread::hardware_concurrency();
+  boost::asio::thread_pool pool(num_threads);
+  LOG_INFO << "Number of threads for board detection :: " << num_threads;
+
+  std::size_t num_frames = fn.size();
+  if (num_frames > 0u) {
+    cv::Mat image = cv::imread(fn[0]);
+    cams_[cam_idx]->im_cols_ = image.cols;
+    cams_[cam_idx]->im_rows_ = image.rows;
+  }
+  for (std::size_t frame_idx = 0u; frame_idx < num_frames; ++frame_idx) {
+    LOG_DEBUG << "Frame index :: " << frame_idx;
+
+    // detect the checkerboard on this image
+    const std::string frame_path = fn[frame_idx];
+    boost::asio::post(pool, std::bind(&Calibration::detectBoardsInImage, this,
+                                      frame_path, cam_idx, frame_idx));
+    // displayBoards(currentIm, cam, frameind); // Display frame
+  }
+  pool.join();
 }
 
 /**
  * @brief Detect boards on an image
  *
- * @param image Image on which we would like to detect the board
+ * @param frame_path image path on which we would like to detect the board
  * @param cam_idx camera index which acquire the frame
  * @param frame_idx frame index
  */
-void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
-                               const int frame_idx,
-                               const std::string frame_path) {
+void Calibration::detectBoardsInImage(const std::string frame_path,
+                                      const int cam_idx, const int frame_idx) {
+  cv::Mat image = cv::imread(frame_path);
   // Greyscale image for subpixel refinement
   cv::Mat graymat;
   cv::cvtColor(image, graymat, cv::COLOR_BGR2GRAY);
-
-  // Initialize image size
-  cams_[cam_idx]->im_cols_ = graymat.cols;
-  cams_[cam_idx]->im_rows_ = graymat.rows;
 
   // Datastructure to save the checkerboard corners
   std::map<int, std::vector<int>>
@@ -222,7 +241,7 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
     }
 
     if (charuco_corners[i].size() >
-        (int)round(min_perc_pts_ * boards_3d_[i]->nb_pts_)) {
+        static_cast<int>(std::round(min_perc_pts_ * boards_3d_[i]->nb_pts_))) {
       LOG_INFO << "Number of detected corners :: " << charuco_corners[i].size();
       // Refine the detected corners
       if (refine_corner_ == true) {
@@ -252,12 +271,15 @@ void Calibration::detectBoards(const cv::Mat image, const int cam_idx,
 
       // Add the board to the datastructures (if it passes the collinearity
       // check)
-      if ((residual > boards_3d_[i]->square_size_ * 0.1) &
+      if ((residual > boards_3d_[i]->square_size_ * 0.1) &&
           (charuco_corners[i].size() > 4)) {
         int board_idx = i;
-        insertNewBoard(cam_idx, frame_idx, board_idx,
-                       charuco_corners[board_idx], charuco_idx[board_idx],
-                       frame_path);
+        {
+          std::unique_lock<std::mutex> lock(insert_new_board_lock_);
+          insertNewBoard(cam_idx, frame_idx, board_idx,
+                         charuco_corners[board_idx], charuco_idx[board_idx],
+                         frame_path);
+        }
       }
     }
   }
@@ -307,22 +329,37 @@ void Calibration::saveCamerasParams() {
  * @brief Save all the 3D object
  *
  * Export 3D points constituting the objects.
- *
+ * Format: X Y Z board_id pts_id
  */
 void Calibration::save3DObj() {
   std::string save_path_object = save_path_ + "calibrated_objects_data.yml";
   cv::FileStorage fs(save_path_object, cv::FileStorage::WRITE);
 
   for (const auto &it_obj : object_3d_) {
+    unsigned int obj_pts_count = 0;
     std::shared_ptr<Object3D> cur_object = it_obj.second;
     fs << "object_" + std::to_string(cur_object->obj_id_);
     int obj_nb_pts = cur_object->nb_pts_;
-    cv::Mat pts_mat(3, obj_nb_pts, CV_32FC1);
-    for (int i = 0; i < obj_nb_pts; i++) {
-      cv::Point3f curr_pts = cur_object->pts_3d_[i];
-      pts_mat.at<float>(0, i) = curr_pts.x;
-      pts_mat.at<float>(1, i) = curr_pts.y;
-      pts_mat.at<float>(2, i) = curr_pts.z;
+    cv::Mat pts_mat(5, obj_nb_pts, CV_32FC1);
+    for (const auto &it_board : cur_object->boards_) {
+      auto board_ptr = it_board.second.lock();
+      if (board_ptr) {
+        const int board_idx = board_ptr->board_id_;
+        // Replace the keypoints
+        for (int i = 0; i < board_ptr->nb_pts_; i++) {
+          std::pair<int, int> board_id_pts_id = std::make_pair(board_idx, i);
+          cv::Point3f curr_pts =
+              cur_object
+                  ->pts_3d_[cur_object->pts_board_2_obj_[board_id_pts_id]];
+          pts_mat.at<float>(0, obj_pts_count) = curr_pts.x;
+          pts_mat.at<float>(1, obj_pts_count) = curr_pts.y;
+          pts_mat.at<float>(2, obj_pts_count) = curr_pts.z;
+          pts_mat.at<float>(3, obj_pts_count) = static_cast<float>(board_idx);
+          pts_mat.at<float>(4, obj_pts_count) =
+              static_cast<float>(board_id_pts_id.second);
+          obj_pts_count++;
+        }
+      }
     }
     fs << "{"
        << "points" << pts_mat;
